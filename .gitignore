@@ -1,0 +1,52 @@
+# ========================= Python & Virtual Environments =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+.venv/
+venv/
+ENV/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ======================== Visual Studio & Python Tools (PTVS) ====================
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.pyproj.user
+*.VC.db
+*.VC.VC.opendb
+ipch/
+x64/
+x86/
+Debug/
+Release/
+
+# ============================ IDEs & Editors Khác ================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ============================ Biến môi trường & Bí mật ===========================
+.env
+.env.local
+.env.*.local
+
+# ============================ Hệ điều hành (Windows/macOS) =======================
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
