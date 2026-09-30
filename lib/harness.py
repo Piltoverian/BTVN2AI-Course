@@ -40,7 +40,10 @@ def prompt_tu_rang_buoc(rb: RangBuocDatVe) -> str:
         f"Ràng buộc đặt vé: ngân sách tối đa {rb['ngan_sach_toi_da']:,}đ; "
         f"hạng ghế {rb['hang_ghe_cho_phep']}; "
         f"giờ khởi hành từ {rb['gio_khoi_hanh_tu']} đến {rb['gio_khoi_hanh_den']}; "
-        f"sân bay hỗ trợ {rb['san_bay_hop_le']}."
+        f"sân bay hỗ trợ {rb['san_bay_hop_le']}. "
+        "Khi trả lời cuối cùng, chỉ nêu dữ kiện lấy từ kết quả tool "
+        "(mã đặt chỗ, mã chuyến, giờ bay, giá vé dạng X.XXX.XXXđ), "
+        "KHÔNG nhắc lại đề bài hay các thông số ràng buộc."
     )
 
 
@@ -133,7 +136,13 @@ def trich_du_kien(text: str) -> list:
 def kiem_can_cu(cau_tra_loi: str, ket_qua_tool: list) -> dict:
     """ket_qua_tool: danh sách nội dung các ToolMessage đã nhận trong phiên."""
     nguon = " ".join(str(x) for x in ket_qua_tool)
-    chi_tiet = [{"du_kien": d, "co_nguon": d in nguon} for d in trich_du_kien(cau_tra_loi)]
+    chi_tiet = [
+        {
+            "du_kien": d,
+            "co_nguon": (d in nguon) or (re.sub(r"\s?(?:VNĐ|đồng)$", "đ", d) in nguon),
+        }
+        for d in trich_du_kien(cau_tra_loi)
+    ]
     thieu = [c["du_kien"] for c in chi_tiet if not c["co_nguon"]]
     return {"dat": not thieu, "chi_tiet": chi_tiet, "khong_co_nguon": thieu}
 

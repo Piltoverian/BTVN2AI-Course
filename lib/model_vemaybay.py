@@ -11,31 +11,20 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-try:
-    from lib.harness import RANG_BUOC_MAC_DINH, kiem_rang_buoc
-except ImportError:
-    from harness import RANG_BUOC_MAC_DINH, kiem_rang_buoc
-
 BIEN_THE_SAN_BAY = ["Vung Tau", "Vũng Tàu", "VTG", "Vung Tau"]
 
 
 class ModelGiaVeMayBay(BaseChatModel):
-    """Model giả lập cho Agent đặt vé máy bay.
-
-    Tham số kich_ban:
-        "react"         suy luận từng bước theo observation thực tế
-        "plan-execute"  lập kế hoạch chọn chuyến đầu tiên, không re-plan khi hết ghế
-        "lai"           lập kế hoạch có lọc ràng buộc + tự re-plan sang chuyến dự phòng
-        "lap"           tìm sân bay không có trong dữ liệu, lặp lại cách viết ở V4
+    """Model giả lập chỉ thực hiện gọi tool dựa trên observation trong messages.
+    Không phân nhánh theo mẫu thiết kế; dùng chung Middleware với model_that().
     """
 
-    kich_ban: str = "react"
-    rb: dict = RANG_BUOC_MAC_DINH
+    kich_ban: str = "chuan"
     _luot: int = 0
 
     @property
     def _llm_type(self) -> str:
-        return f"se373-model-vemaybay-{self.kich_ban}"
+        return "se373-model-vemaybay"
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> "ModelGiaVeMayBay":
         return self
@@ -72,55 +61,39 @@ class ModelGiaVeMayBay(BaseChatModel):
         if not ds_chuyen:
             return self._goi("search_flights", {"origin": "HAN", "destination": "DAD", "date": "06/09"})
 
-        da_goi_tool = [
-            (c["name"], c["args"])
-            for m in messages
-            for c in (getattr(m, "tool_calls", None) or [])
-        ]
-        da_kiem_tra = {
-            args.get("flight_id")
-            for ten, args in da_goi_tool
-            if ten in ("get_flight_detail", "hold_booking")
-        }
-        da_thu_xuat_ve = any(ten == "issue_ticket" for ten, _ in da_goi_tool)
-
         if don_giu_cho:
-            if self.kich_ban == "react" and not da_thu_xuat_ve:
-                return self._goi("issue_ticket", {"booking_id": don_giu_cho["booking_id"]})
             return AIMessage(content=self._tra_loi(don_giu_cho))
 
+        da_thu_hold = {
+            c["args"].get("flight_id")
+            for m in messages
+            for c in (getattr(m, "tool_calls", None) or [])
+            if c["name"] == "hold_booking"
+        }
+
         for fid, f in chi_tiet_ok.items():
-            return self._goi("hold_booking", {
-                "flight_id": fid,
-                "passenger_name": "Nguyen Van A",
-                "price": f["price"],
-                "cabin": f["cabin"],
-                "origin": f["origin"],
-                "destination": f["destination"],
-                "dep_time": f["dep_time"],
-            })
+            if fid not in da_thu_hold:
+                return self._goi("hold_booking", {
+                    "flight_id": fid,
+                    "passenger_name": "Nguyen Van A",
+                    "price": f["price"],
+                    "cabin": f["cabin"],
+                    "origin": f["origin"],
+                    "destination": f["destination"],
+                    "dep_time": f["dep_time"],
+                })
 
-        if self.kich_ban == "plan-execute":
-            muc_tieu = ds_chuyen[0]
-            if muc_tieu["flight_id"] not in da_kiem_tra:
-                return self._goi("get_flight_detail", {"flight_id": muc_tieu["flight_id"]})
-            return AIMessage(
-                content=(
-                    f"Chuyến {muc_tieu['flight_id']} lúc {muc_tieu['dep_time']} "
-                    f"giá {muc_tieu['price_str']} đã hết ghế, kế hoạch cố định không thể hoàn tất."
-                )
-            )
+        da_kiem_tra = {
+            c["args"].get("flight_id")
+            for m in messages
+            for c in (getattr(m, "tool_calls", None) or [])
+            if c["name"] in ("get_flight_detail", "hold_booking")
+        }
 
-        if self.kich_ban == "lai":
-            ung_vien = [f for f in ds_chuyen if not kiem_rang_buoc(f, self.rb)]
-            ung_vien.sort(key=lambda x: x["price"])
-        else:
-            ung_vien = sorted(ds_chuyen, key=lambda x: x["price"], reverse=True)
-
-        con_lai = [f for f in ung_vien if f["flight_id"] not in da_kiem_tra]
+        con_lai = [f for f in ds_chuyen if f["flight_id"] not in da_kiem_tra]
         if con_lai:
             tiep = con_lai[0]
-            if self.kich_ban == "react" and tiep["price"] > self.rb["ngan_sach_toi_da"]:
+            if tiep["cabin"] != "Economy":
                 return self._goi("hold_booking", {
                     "flight_id": tiep["flight_id"],
                     "passenger_name": "Nguyen Van A",
@@ -132,7 +105,7 @@ class ModelGiaVeMayBay(BaseChatModel):
                 })
             return self._goi("get_flight_detail", {"flight_id": tiep["flight_id"]})
 
-        return AIMessage(content="Không tìm được chuyến bay nào còn ghế thỏa mãn yêu cầu.")
+        return AIMessage(content="Không còn chuyến bay nào khả dụng trong kế hoạch.")
 
     @staticmethod
     def _tra_loi(don: dict) -> str:
@@ -157,9 +130,16 @@ class ModelGiaVeMayBay(BaseChatModel):
 
 
 def model_that():
+    """Model thật, đọc SE373_MODEL trong .env. Chỉ dùng khi có API key.
+
+    Ví dụ SE373_MODEL: "openai:gpt-4.1-mini" · "anthropic:claude-sonnet-4-5"
+    """
     from langchain.chat_models import init_chat_model
 
     ten = os.environ.get("SE373_MODEL")
     if not ten:
-        raise SystemExit("Chưa đặt biến môi trường SE373_MODEL trong .env")
+        raise SystemExit(
+            "Chưa đặt SE373_MODEL. Copy .env.example thành .env, điền model và khoá API,\n"
+            "rồi chạy:  set -a && source .env && set +a"
+        )
     return init_chat_model(ten)
